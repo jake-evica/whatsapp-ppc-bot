@@ -7,7 +7,7 @@ import os
 
 from app.config import Config
 from app.utils.logger import Logger
-from app.services.ppc_bids_service import PPCBidService
+from app.services.ppc_bid_service import PPCBidService
 from app.services.ppc_campaign_service import PPCCampaignService
 
 logging = Logger().get_logger()
@@ -78,12 +78,15 @@ class WhatsAppService:
         try:
             if process_type == "bids":
                 df = PPCBidService.optimize_bids(file_path)
+                output_filename = None
             elif process_type == "campaigns":
-                df = PPCCampaignService.create_campaign(file_path)
+                output_filename = PPCCampaignService.create_campaign(file_path)
             else:
                 return None
 
-            output_filename = os.path.basename(file_path).replace(".xlsx", "_processed.xlsx")
+            if not output_filename:
+                output_filename = os.path.basename(file_path).replace(".xlsx", "_processed.xlsx")
+
             output_directory = "app/static/processed_files"
             os.makedirs(output_directory, exist_ok=True)
 
