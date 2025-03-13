@@ -1,55 +1,110 @@
 import pandas as pd
-from typing import Tuple
+from openpyxl import load_workbook
+import datetime
 
 
 class PPCBidService:
     @staticmethod
-    def _load_data(file_path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        xls = pd.ExcelFile(file_path)
-        ppc_df = pd.read_excel(xls, sheet_name="Sponsored Products")
-        asin_df = pd.read_excel(xls, sheet_name="ASIN Data")
-        return ppc_df, asin_df
+    def load_excel_data(file_path):
+        """Load Excel file and return workbook object."""
+        try:
+            return load_workbook(file_path)
+        except FileNotFoundError:
+            print(f"Error: File '{file_path}' not found.")
+            exit()
 
     @staticmethod
-    def _prepare_data(ppc_df: pd.DataFrame, asin_df: pd.DataFrame) -> pd.DataFrame:
-        ppc_df = ppc_df[[
-            "Ad Group ID", "Keyword ID", "Product Targeting ID", "Clicks",
-            "Spend", "Sales", "Orders", "ACOS", "CPC", "ROAS"
-        ]].copy()
-
-        for col in ["Clicks", "Spend", "Sales", "Orders", "ACOS", "CPC", "ROAS"]:
-            ppc_df[col] = pd.to_numeric(ppc_df[col], errors="coerce").fillna(0)
-
-        ppc_df["Product Targeting ID"] = ppc_df["Product Targeting ID"].astype(str)
-        asin_df["Product Targeting ID"] = asin_df["ASIN"].astype(str)
-        return ppc_df.merge(asin_df, on="Product Targeting ID", how="left")
+    def get_data_frame(file_path, sheet_name):
+        """Load a sheet from an Excel file into a Pandas DataFrame."""
+        try:
+            return pd.read_excel(file_path, sheet_name=sheet_name).fillna(0)
+        except ValueError:
+            print(f"Error: Sheet '{sheet_name}' not found in the workbook.")
+            exit()
 
     @staticmethod
-    def _calculate_new_bids(row: pd.Series, target_acos: float) -> float:
-        if row["Clicks"] > 0:
-            return (row["Sales"] / row["Clicks"]) * target_acos
-        return row["CPC"]  # Keep the same bid if there are no clicks
+    def load_asin_data(file_path):
+        """Load ASIN to AOV mapping from 'ASIN Data' sheet if available."""
+        wb = PPCBidService.load_excel_data(file_path)
+        if "ASIN Data" in wb.sheetnames:
+            df_asin = PPCBidService.get_data_frame(file_path, "ASIN Data")
+            return dict(zip(df_asin.iloc[:, 0], df_asin.iloc[:, 1]))  # ASIN to AOV mapping
+        return {}
 
     @staticmethod
-    def _adjust_bid(row: pd.Series, target_acos: float) -> float:
-        if row["ACOS"] > target_acos:
-            return row["New Bid"] * 0.9  # Reduce bid by 10%
-        return row["New Bid"] * 1.1  # Increase bid by 10%
+    def load_campaign_data(file_path):
+        """Load campaign data from the second sheet in the Excel file."""
+        wb = PPCBidService.load_excel_data(file_path)
+        sheet_names = wb.sheetnames
+        if len(sheet_names) < 2:
+            print("Error: Not enough sheets in the workbook.")
+            exit()
+        return PPCBidService.get_data_frame(file_path, sheet_names[0])
 
     @staticmethod
-    def optimize_bids(file_path: str, target_acos: float = 0.3) -> pd.DataFrame:
-        ppc_df, asin_df = PPCBidService._load_data(file_path)
-        ppc_df = PPCBidService._prepare_data(ppc_df, asin_df)
-        ppc_df["New Bid"] = ppc_df.apply(lambda row: PPCBidService._calculate_new_bids(row, target_acos), axis=1)
-        ppc_df["Bid Adjustment"] = ppc_df.apply(lambda row: PPCBidService._adjust_bid(row, target_acos), axis=1)
-        ppc_df["Final Bid"] = ppc_df["Bid Adjustment"].clip(lower=0.01)
-        return ppc_df
+    def calculate_metrics(df, asin_dict):
+        """Compute required fields such as ACTC, AOV, % of AOV, and RPC."""
+        df["ACTC"] = df["Clicks"] / df["Orders"].replace(0, 1)
+        df["AOV"] = df.apply(
+            lambda row: row["Sales"] / row["Orders"] if row["Orders"] > 0 else asin_dict.get(row["ASIN (Informational only)"], 0), axis=1
+        )
+        df["% of AOV"] = df["Spend"] / df["AOV"].replace(0, 1)
+        df["RPC"] = df["Sales"] / df["Clicks"].replace(0, 1)
+        return df
 
     @staticmethod
-    def save_results(output_file: str, optimized_df: pd.DataFrame):
-        optimized_df.to_excel(output_file, index=False)
+    def adjust_bid(row, target_acos, increase_spend):
+        """Apply bid adjustments based on ACOS conditions."""
+        acos = row["ACOS"]
+        orders = row["Orders"]
+        aov_percent = row["% of AOV"]
+        impressions = row["Impressions"]
+
+        if acos >= target_acos * 1.1:  # High ACOS (Reduce Bid)
+            return row["RPC"] * target_acos
+        elif acos <= target_acos * 0.9 and orders > 1:  # Low ACOS (Increase Bid)
+            return row["Old Bid"] * 1.15
+        elif acos <= target_acos * 0.9 and orders == 1:
+            return row["Old Bid"] * 1.05
+        elif acos == 0 and aov_percent >= target_acos * 0.9:
+            return row["Sales"] / (row["Clicks"] + row["Impressions"]) * target_acos
+        elif increase_spend and acos == 0 and aov_percent <= 0.1 and impressions >= 0.003:
+            return row["Old Bid"] * 1.05
+        return row["Old Bid"]
+
+    @staticmethod
+    def optimize_bids(file_path, target_acos = 0.3, increase_spend = True):
+        """
+        Main function that runs all processes and returns the final DataFrame.
+        :param file_path: Path to the Excel file.
+        :param target_acos: Target ACOS value (e.g., 0.3 for 30%).
+        :param increase_spend: Boolean flag (True/False) to increase spend on low-spend keywords.
+        :return: Processed DataFrame with optimized bids.
+        """
+        # Step 1: Load data
+        asin_dict = PPCBidService.load_asin_data(file_path)
+        df = PPCBidService.load_campaign_data(file_path)
+
+        # Ensure "Old Bid" column exists
+        if "Old Bid" not in df.columns:
+            df["Old Bid"] = df["Bid"]
+
+        # Step 2: Process data
+        df = PPCBidService.calculate_metrics(df, asin_dict)
+
+        # Step 3: Apply bid adjustments
+        df["New Bid"] = df.apply(lambda row: PPCBidService.adjust_bid(row, target_acos, increase_spend), axis=1)
+        df["Update"] = df["New Bid"] != df["Old Bid"]
+
+        # Step 4: Filter rows that require an update
+        df = df[df["Update"]]
+        return df
 
 
+# Run the script
 if __name__ == "__main__":
-    processed_df = PPCBidService.optimize_bids(file_path="data/raw/sample_bid_0001.xlsx")
-    PPCBidService.save_results(output_file="data/processed/optimized_bid.xlsx", optimized_df=processed_df)
+    file_path = "data/raw/sample_bid_0001.xlsx"
+    df_optimized = PPCBidService.optimize_bids(file_path)
+
+    output_file = f"data/processed/Bid_Optimization_{datetime.datetime.now().strftime('%m%d%y')}.xlsx"
+    df_optimized.to_excel(output_file, index=False)
