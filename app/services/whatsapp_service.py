@@ -7,6 +7,8 @@ import os
 
 from app.config import Config
 from app.utils.logger import Logger
+from app.services.ppc_bids_service import PPCBidService
+from app.services.ppc_campaign_service import PPCCampaignService
 
 logging = Logger().get_logger()
 
@@ -46,25 +48,46 @@ class WhatsAppService:
     def handle_file_upload(
         response: MessagingResponse, user_info: Dict[str, str], media_url: Optional[str], media_type: Optional[str], folder_type: str
     ) -> Response:
-        """Handles file uploads and saves the file dynamically."""
         if not media_url or not media_type:
             response.message("Please upload a valid file.")
             return Response(str(response), content_type="application/xml")
 
         file_extension = WhatsAppService.get_file_extension(media_type)
-        if not file_extension:
-            response.message("Unsupported file type. Please upload an Excel file.")
+        if not file_extension or file_extension not in [".xlsx", ".xls"]:
+            response.message("Unsupported file type. Please upload an Excel file (.xlsx or .xls).")
             return Response(str(response), content_type="application/xml")
 
         file_name = WhatsAppService.generate_file_name(user_info["name"], folder_type, file_extension)
         downloaded_file = WhatsAppService.download_file(media_url, file_name)
 
         if downloaded_file:
-            response.message(f"Your file has been uploaded successfully.")
+            processed_file = WhatsAppService.process_uploaded_file(downloaded_file, folder_type)
+            if processed_file:
+                response.message("Your file has been processed successfully. Here is the download link:")
+                response.message(f"{Config.SERVER_URL}/{processed_file}")
+            else:
+                response.message("Error processing the file. Please check the format and try again.")
         else:
             response.message("Failed to download the file. Please try again.")
 
         return Response(str(response), content_type="application/xml")
+
+    @staticmethod
+    def process_uploaded_file(file_path: str, process_type: str) -> Optional[str]:
+        """Processes the uploaded Excel file based on the requested action."""
+        try:
+            if process_type == "bids":
+                output_file = optimize_bids(file_path)
+            elif process_type == "campaigns":
+                output_file = create_ppc_campaign(file_path)
+            else:
+                return None
+            
+            return output_file
+
+        except Exception as e:
+            logging.error(f"Error processing file: {e}", exc_info=True)
+            return None
 
     @staticmethod
     def get_user_info(payload: Dict[str, Any]) -> Dict[str, str]:
