@@ -2,7 +2,7 @@ import uuid
 import pandas as pd
 import datetime
 
-class AmazonKeywordGenerator:
+class PPCCampaignService:
     @staticmethod
     def load_data(file_path, sheet_name):
         """Load a sheet from an Excel file into a Pandas DataFrame."""
@@ -38,9 +38,9 @@ class AmazonKeywordGenerator:
         """Generates Amazon keywords based on ACOS threshold and brand exclusions."""
         
         # Load sheets
-        df_search = AmazonKeywordGenerator.load_data(file_path, "SP Search Term Report")
-        df_campaigns = AmazonKeywordGenerator.load_data(file_path, "Sponsored Products Campaigns")
-        df_asin_list = AmazonKeywordGenerator.load_data(file_path, "ASIN List")
+        df_search = PPCCampaignService.load_data(file_path, "SP Search Term Report")
+        df_campaigns = PPCCampaignService.load_data(file_path, "Sponsored Products Campaigns")
+        df_asin_list = PPCCampaignService.load_data(file_path, "ASIN List")
 
         # Convert ASINs to a set for fast lookup
         own_asins = set(df_asin_list["ASIN"].str.upper())
@@ -59,8 +59,8 @@ class AmazonKeywordGenerator:
         for _, row in df_search.iterrows():
             search_term = row["Customer Search Term"].strip()
             orders = int(row["Orders"])
-            acos = AmazonKeywordGenerator.safe_float(row["ACOS"])
-            bid = AmazonKeywordGenerator.safe_float(row["Bid"])  # Safe conversion
+            acos = PPCCampaignService.safe_float(row["ACOS"])
+            bid = PPCCampaignService.safe_float(row["Bid"])  # Safe conversion
             campaign_id = row["Campaign ID"]
             ad_group_name = row["Ad Group Name (Informational only)"]
 
@@ -68,7 +68,7 @@ class AmazonKeywordGenerator:
                 exclude = any(brand in search_term.lower() for brand in excluded_brands)
 
                 if not exclude:
-                    sku = AmazonKeywordGenerator.get_sku(df_campaigns, campaign_id)
+                    sku = PPCCampaignService.get_sku(df_campaigns, campaign_id)
                     keyword_info = [search_term, orders, bid, ad_group_name]
 
                     if search_term.upper() in own_asins:
@@ -105,4 +105,4 @@ class AmazonKeywordGenerator:
 
 if __name__ == "__main__":
     file_path = "data/raw/campaign_creation_0001.xlsx"
-    output_file = AmazonKeywordGenerator.create_campaign(file_path)
+    output_file = PPCCampaignService.create_campaign(file_path)
