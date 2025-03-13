@@ -75,25 +75,27 @@ class WhatsAppService:
     @staticmethod
     def process_uploaded_file(file_path: str, process_type: str) -> Optional[str]:
         """Processes the uploaded Excel file based on the requested action."""
+        output_directory = "app/static/processed_files"
+        os.makedirs(output_directory, exist_ok=True)
         try:
             if process_type == "bids":
                 df = PPCBidService.optimize_bids(file_path)
-                output_filename = None
+                output_filename = os.path.basename(file_path).replace(".xlsx", "_processed.xlsx")
+                output_file_path = os.path.join(output_directory, output_filename)
+                df.to_excel(output_file_path, index=False)
+                file_url = f'{Config.SERVER_URL}/static/processed_files/{output_filename}'
+                logging.info(f'file_url: {file_url}')
+                return file_url
+
             elif process_type == "campaigns":
                 output_filename = PPCCampaignService.create_campaign(file_path)
+                output_file_path = os.path.join(output_directory, output_filename)
+                file_url = f'{Config.SERVER_URL}/static/processed_files/{output_filename}'
+                logging.info(f'file_url: {file_url}')
+                return file_url
             else:
+                logging.info('here')
                 return None
-
-            if not output_filename:
-                output_filename = os.path.basename(file_path).replace(".xlsx", "_processed.xlsx")
-
-            output_directory = "app/static/processed_files"
-            os.makedirs(output_directory, exist_ok=True)
-
-            output_file_path = os.path.join(output_directory, output_filename)
-            df.to_excel(output_file_path, index=False)
-            file_url = f'{Config.SERVER_URL}/static/processed_files/{output_filename}'
-            return file_url
 
         except Exception as e:
             logging.error(f"Error processing file: {e}", exc_info=True)

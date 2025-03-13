@@ -91,7 +91,8 @@ class PPCCampaignService:
         df_product_targets_review = pd.DataFrame(product_targets_review, columns=["Keyword", "Orders", "Bid", "Ad Group"])
 
         # Save output
-        output_file = f"keywords_{str(uuid.uuid4())}.xlsx"
+        output_filename = f"keywords_{current_date}.xlsx"
+        output_file = f"app/static/processed_files/{output_filename}"
         with pd.ExcelWriter(output_file) as writer:
             df_high_orders.to_excel(writer, sheet_name="3+ Orders", index=False)
             df_high_review.to_excel(writer, sheet_name="3+ Orders - Review", index=False)
@@ -100,4 +101,4 @@ class PPCCampaignService:
             df_product_targets.to_excel(writer, sheet_name="Product Targets", index=False)
             df_product_targets_review.to_excel(writer, sheet_name="Product Targets - Review", index=False)
 
-        return output_file
+        return output_filename
