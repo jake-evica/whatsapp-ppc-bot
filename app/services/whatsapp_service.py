@@ -63,8 +63,8 @@ class WhatsAppService:
         if downloaded_file:
             processed_file = WhatsAppService.process_uploaded_file(downloaded_file, folder_type)
             if processed_file:
-                response.message("Your file has been processed successfully. Here is the download link:")
-                response.message(f"{Config.SERVER_URL}/{processed_file}")
+                response.message("Your file has been processed successfully.")
+                response.message().media(processed_file)
             else:
                 response.message("Error processing the file. Please check the format and try again.")
         else:
@@ -77,13 +77,20 @@ class WhatsAppService:
         """Processes the uploaded Excel file based on the requested action."""
         try:
             if process_type == "bids":
-                output_file = optimize_bids(file_path)
+                df = PPCBidService.optimize_bids(file_path)
             elif process_type == "campaigns":
-                output_file = create_ppc_campaign(file_path)
+                df = PPCCampaignService.create_campaign(file_path)
             else:
                 return None
-            
-            return output_file
+
+            output_filename = os.path.basename(file_path).replace(".xlsx", "_processed.xlsx")
+            output_directory = "app/static/processed_files"
+            os.makedirs(output_directory, exist_ok=True)
+
+            output_file_path = os.path.join(output_directory, output_filename)
+            df.to_excel(output_file_path, index=False)
+            file_url = f'{Config.SERVER_URL}/static/processed_files/{output_filename}'
+            return file_url
 
         except Exception as e:
             logging.error(f"Error processing file: {e}", exc_info=True)
